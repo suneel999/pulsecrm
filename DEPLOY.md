@@ -25,7 +25,7 @@ Wait 5–30 minutes. Security group on that EC2 must allow **22, 80, 443**.
 ```bash
 sudo apt update
 sudo apt install -y docker.io docker-compose-v2 git
-sudo git clone https://github.com/suneel999/pulse_desk.git /opt/pulse-desk
+sudo git clone https://github.com/suneel999/pulsecrm.git /opt/pulse-desk
 cd /opt/pulse-desk
 sudo cp .env.example .env
 sudo nano .env

@@ -20,7 +20,7 @@ Open http://127.0.0.1:8090/login
 ## AWS
 
 1. New Ubuntu EC2, open 22, 80, 443.
-2. Clone this folder to `/opt/pulse-desk`.
+2. Clone https://github.com/suneel999/pulsecrm.git to `/opt/pulse-desk`.
 3. Copy `.env.example` to `.env` and set `ADMIN_PASS` and `CRM_INGEST_KEY`.
 4. Hostinger DNS: A record `desk` → EC2 public IP.
 5. `sudo docker compose up -d --build`
