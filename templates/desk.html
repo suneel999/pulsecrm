@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="queues">
+  <a class="{% if view == 'fresh' %}on{% endif %}" href="{{ page_url(view='fresh', page=1, status='') }}">
+    Fresh today <b>{{ stats.today }}</b>
+  </a>
+  <a class="{% if view == 'coming' %}on{% endif %}" href="{{ page_url(view='coming', page=1, status='') }}">
+    Coming today <b>{{ stats.coming }}</b>
+  </a>
+  <a class="{% if view == 'todo' %}on{% endif %}" href="{{ page_url(view='todo', page=1, status='') }}">
+    To call <b>{{ stats.new }}</b>
+  </a>
+  <a class="{% if view == 'followup' %}on{% endif %}" href="{{ page_url(view='followup', page=1, status='') }}">
+    Follow-up <b>{{ stats.followup }}</b>
+  </a>
+  <a class="{% if view == 'all' %}on{% endif %}" href="{{ page_url(view='all', page=1, status='') }}">
+    All
+  </a>
+</nav>
+
+<div class="toolbar">
+  <form class="search" method="get">
+    <input type="hidden" name="view" value="{{ view }}">
+    <input name="q" value="{{ q }}" placeholder="Search name or number">
+    <button type="submit">Find</button>
+  </form>
+  <div class="toolbar-actions">
+    <form method="post" action="{{ url_for('sync_app') }}">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <button type="submit" class="ghost">Sync Hi Pulse App</button>
+    </form>
+    <form class="month-form" method="get" action="{{ url_for('report') }}">
+      <input type="month" name="month" value="{{ month }}" aria-label="Month">
+      <button type="submit">Month Excel</button>
+    </form>
+  </div>
+</div>
+{% if sync_error %}
+<p class="warn">App sync issue: {{ sync_error }}</p>
+{% endif %}
+
+<details class="card add-box">
+  <summary>Add phone / walk-in</summary>
+  <form method="post" action="{{ url_for('add_manual') }}" class="add-grid">
+    <input name="name" placeholder="Name" required>
+    <input name="phone" placeholder="Mobile" required>
+    <input name="preferred_date" type="date" aria-label="Date">
+    <input name="preferred_time" placeholder="Time e.g. 10:00 AM">
+    <input name="doctor" placeholder="Doctor">
+    <select name="source">
+      <option value="phone">Phone call</option>
+      <option value="walk-in">Walk-in</option>
+      <option value="whatsapp">WhatsApp</option>
+    </select>
+    <button type="submit">Add</button>
+  </form>
+</details>
+
+<p class="count">{{ total }} appointments · page {{ page }} of {{ pages }}</p>
+
+<div class="table-wrap">
+  <table class="desk">
+    <thead>
+      <tr>
+        <th>Patient</th>
+        <th>From</th>
+        <th>Mobile</th>
+        <th>Slot</th>
+        <th>Doctor</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if not rows %}
+      <tr><td colspan="7" class="muted">Nothing in this list. Try another tab or Sync Hi Pulse App.</td></tr>
+      {% endif %}
+      {% for row in rows %}
+      <tr class="st-{{ row.status }}">
+        <td>
+          <strong>{{ row.name }}</strong>
+          <div class="tiny">{{ format_when(row.created_at) }}</div>
+        </td>
+        <td><span class="tag tag-{{ row.source or 'other' }}">{{ source_label(row.source) }}</span></td>
+        <td><a class="call" href="tel:{{ row.phone }}">{{ row.phone }}</a></td>
+        <td>{{ format_slot(row.preferred_date, row.preferred_time) }}</td>
+        <td>{{ short_doctor(row.doctor) }}</td>
+        <td>
+          <form method="post" action="{{ url_for('update', appt_id=row.id) }}">
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <select name="status" onchange="this.form.submit()" aria-label="Status">
+              {% for key, label in STATUSES %}
+              <option value="{{ key }}" {% if row.status == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </td>
+        <td><button type="button" class="linkish" onclick="document.getElementById('more-{{ row.id }}').classList.toggle('open')">Notes</button></td>
+      </tr>
+      <tr id="more-{{ row.id }}" class="more">
+        <td colspan="7">
+          <form method="post" action="{{ url_for('update', appt_id=row.id) }}" class="more-form">
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <input type="hidden" name="status" value="{{ row.status }}">
+            <input type="hidden" name="save_details" value="1">
+            <textarea name="notes" rows="2" placeholder="Call notes">{{ row.notes }}</textarea>
+            <div class="svc">
+              {% for item in SERVICES %}
+              <label><input type="checkbox" name="services" value="{{ item }}" {% if item in row.services_list %}checked{% endif %}> {{ item }}</label>
+              {% endfor %}
+            </div>
+            <input name="service_other" value="{{ row.service_other }}" placeholder="Other service">
+            <button type="submit">Save notes</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}
+  <a href="{{ page_url(page=page-1) }}">Previous</a>
+  {% endif %}
+  <span>{{ page }} / {{ pages }}</span>
+  {% if page < pages %}
+  <a href="{{ page_url(page=page+1) }}">Next</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% endblock %}

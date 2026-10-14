@@ -1,0 +1,7 @@
+desk.thepulseheart.com {
+	reverse_proxy desk:8080
+}
+
+http:// {
+	redir https://desk.thepulseheart.com{uri} permanent
+}

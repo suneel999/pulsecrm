@@ -1,0 +1,5 @@
+.env
+data/*.sqlite
+data/*.xlsx
+__pycache__/
+*.pyc

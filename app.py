@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+import io
+import os
+import time
+from functools import wraps
+
+from dotenv import load_dotenv
+from flask import (
+    Flask,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+load_dotenv()
+
+import app_api
+import db
+
+app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.secret_key = os.getenv("FLASK_SECRET", "pulse-desk-dev-secret")
+app.config["PREFERRED_URL_SCHEME"] = "https"
+
+_last_app_sync = 0.0
+_SYNC_GAP_SEC = 90
+
+
+def env(name: str, default: str = "") -> str:
+    return (os.getenv(name) or default).strip()
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("staff"):
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+@app.context_processor
+def inject():
+    return {
+        "STATUSES": db.STATUSES,
+        "SERVICES": db.SERVICES,
+        "format_when": db.format_when,
+        "format_slot": db.format_slot,
+        "short_doctor": db.short_doctor,
+        "source_label": source_label,
+        "today": db.today(),
+    }
+
+
+def source_label(source: str) -> str:
+    key = (source or "").lower()
+    if key == "app":
+        return "App"
+    if key == "website":
+        return "Web"
+    if key == "walk-in":
+        return "Walk-in"
+    if key == "whatsapp":
+        return "WA"
+    if key == "phone":
+        return "Phone"
+    return source or "—"
+
+
+def sync_app_requests(force: bool = False) -> dict | None:
+    global _last_app_sync
+    if not env("APP_API_EMAIL") or not env("APP_API_PASSWORD"):
+        return None
+    now = time.time()
+    if not force and _last_app_sync and (now - _last_app_sync) < _SYNC_GAP_SEC:
+        return {"skipped": True}
+    rows = app_api.fetch_appointments(limit=50, max_pages=20)
+    result = db.upsert_app(rows)
+    _last_app_sync = now
+    result["fetched"] = len(rows)
+    return result
+
+
+@app.get("/health")
+def health():
+    return {"ok": True, "service": "pulse-desk"}
+
+
+@app.post("/api/ingest")
+def ingest():
+    key = request.headers.get("X-CRM-Key", "")
+    expected = env("CRM_INGEST_KEY")
+    if not expected or key != expected:
+        abort(401)
+    payload = request.get_json(silent=True) or {}
+    try:
+        row = db.create(payload)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}, 400
+    return {"ok": True, "id": row["id"]}
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("staff"):
+        return redirect(url_for("desk"))
+    error = ""
+    if request.method == "POST":
+        user = request.form.get("user", "")
+        password = request.form.get("pass", "")
+        admin_pass = env("ADMIN_PASS")
+        if admin_pass and user == env("ADMIN_USER", "pulse") and password == admin_pass:
+            session["staff"] = user
+            return redirect(request.args.get("next") or url_for("desk"))
+        error = "Wrong username or password."
+    return render_template("login.html", error=error)
+
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+def _desk_query():
+    view = request.args.get("view") or "fresh"
+    if view not in db.VIEWS:
+        view = "fresh"
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except ValueError:
+        page = 1
+    return {
+        "view": view,
+        "status": request.args.get("status") or "",
+        "q": request.args.get("q") or "",
+        "page": page,
+    }
+
+
+def _desk_url(**overrides):
+    params = _desk_query()
+    params.update(overrides)
+    params = {key: value for key, value in params.items() if value not in ("", None)}
+    return url_for("desk", **params)
+
+
+@app.get("/")
+@login_required
+def desk():
+    sync_error = ""
+    try:
+        sync_app_requests(force=False)
+    except Exception as exc:
+        sync_error = str(exc)
+    query = _desk_query()
+    rows, total = db.list_page(
+        view=query["view"],
+        status=query["status"],
+        q=query["q"],
+        page=query["page"],
+    )
+    pages = max(1, (total + db.PAGE_SIZE - 1) // db.PAGE_SIZE)
+    if query["page"] > pages:
+        query["page"] = pages
+        rows, total = db.list_page(
+            view=query["view"], status=query["status"], q=query["q"], page=pages
+        )
+    return render_template(
+        "desk.html",
+        rows=rows,
+        stats=db.stats(),
+        total=total,
+        pages=pages,
+        page=query["page"],
+        view=query["view"],
+        status=query["status"],
+        q=query["q"],
+        month=db.today()[:7],
+        next_url=_desk_url(),
+        page_url=_desk_url,
+        sync_error=sync_error,
+    )
+
+
+@app.post("/sync-app")
+@login_required
+def sync_app():
+    try:
+        result = sync_app_requests(force=True) or {}
+        if result.get("skipped"):
+            flash("App list is already up to date.")
+        else:
+            flash(
+                f"App sync done: {result.get('added', 0)} new, "
+                f"{result.get('refreshed', 0)} refreshed "
+                f"({result.get('fetched', 0)} from Hi Pulse)."
+            )
+    except Exception as exc:
+        flash(f"App sync failed: {exc}")
+    return redirect(request.form.get("next") or url_for("desk", view="fresh"))
+
+
+@app.post("/<int:appt_id>/update")
+@login_required
+def update(appt_id: int):
+    payload = {"status": request.form.get("status")}
+    if "notes" in request.form:
+        payload["notes"] = request.form.get("notes")
+    if request.form.get("save_details"):
+        payload["services"] = request.form.getlist("services")
+        payload["service_other"] = request.form.get("service_other")
+    try:
+        db.update(appt_id, payload)
+    except ValueError as exc:
+        flash(str(exc))
+    return redirect(request.form.get("next") or url_for("desk"))
+
+
+@app.post("/add")
+@login_required
+def add_manual():
+    try:
+        db.create(
+            {
+                "name": request.form.get("name"),
+                "phone": request.form.get("phone"),
+                "email": request.form.get("email"),
+                "department": request.form.get("department"),
+                "doctor": request.form.get("doctor"),
+                "preferred_date": request.form.get("preferred_date"),
+                "preferred_time": request.form.get("preferred_time"),
+                "notes": request.form.get("notes"),
+                "source": request.form.get("source") or "phone",
+                "page": "front-office",
+            }
+        )
+        flash("Appointment added.")
+    except ValueError as exc:
+        flash(str(exc))
+    return redirect(url_for("desk", view="fresh"))
+
+
+@app.get("/report.xlsx")
+@login_required
+def report():
+    month = (request.args.get("month") or db.today()[:7]).strip()
+    rows = db.list_appts(month=month)
+    book = Workbook()
+    sheet = book.active
+    sheet.title = month
+    headers = [
+        "Received",
+        "Name",
+        "Mobile",
+        "Email",
+        "Department",
+        "Doctor",
+        "Preferred date",
+        "Preferred time",
+        "Status",
+        "Services",
+        "Other service",
+        "Notes",
+        "Source",
+        "App ID",
+    ]
+    sheet.append(headers)
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="012D3A")
+    thin = Border(
+        left=Side(style="thin", color="E5E7EB"),
+        right=Side(style="thin", color="E5E7EB"),
+        top=Side(style="thin", color="E5E7EB"),
+        bottom=Side(style="thin", color="E5E7EB"),
+    )
+    for cell in sheet[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+    for row in rows:
+        sheet.append(
+            [
+                row["created_at"],
+                row["name"],
+                row["phone"],
+                row["email"],
+                row["department"],
+                row["doctor"],
+                row["preferred_date"],
+                row["preferred_time"],
+                dict(db.STATUSES).get(row["status"], row["status"]),
+                ", ".join(row.get("services_list") or []),
+                row["service_other"],
+                row["notes"],
+                row["source"],
+                row.get("external_id") or "",
+            ]
+        )
+    visited = sum(1 for row in rows if row["status"] == "visited")
+    sheet.append([])
+    sheet.append(["Total", len(rows), "", "", "", "", "", "", f"Visited {visited}", "", "", "", "", ""])
+    widths = [20, 28, 16, 28, 22, 36, 14, 14, 12, 28, 18, 36, 12, 12]
+    for col, width in enumerate(widths, 1):
+        sheet.column_dimensions[sheet.cell(1, col).column_letter].width = width
+    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, max_col=14):
+        for cell in row:
+            cell.border = thin
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+    buf = io.BytesIO()
+    book.save(buf)
+    buf.seek(0)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=f"pulse-appointments-{month}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+db.connect()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8090")), debug=True)
