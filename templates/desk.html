@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <nav class="queues">
-  <a class="{% if view == 'fresh' %}on{% endif %}" href="{{ page_url(view='fresh', page=1, status='') }}">
-    Fresh today <b>{{ stats.today }}</b>
+  <a class="{% if view == 'fresh' %}on{% endif %}" href="{{ page_url(view='fresh', page=1, status='', day=day or today) }}">
+    Requested <b>{{ stats.day_count }}</b>
   </a>
-  <a class="{% if view == 'coming' %}on{% endif %}" href="{{ page_url(view='coming', page=1, status='') }}">
-    Coming today <b>{{ stats.coming }}</b>
+  <a class="{% if view == 'coming' %}on{% endif %}" href="{{ page_url(view='coming', page=1, status='', day=day or today) }}">
+    Coming <b>{{ stats.coming }}</b>
   </a>
-  <a class="{% if view == 'todo' %}on{% endif %}" href="{{ page_url(view='todo', page=1, status='') }}">
+  <a class="{% if view == 'todo' %}on{% endif %}" href="{{ page_url(view='todo', page=1, status='', day='') }}">
     To call <b>{{ stats.new }}</b>
   </a>
-  <a class="{% if view == 'followup' %}on{% endif %}" href="{{ page_url(view='followup', page=1, status='') }}">
+  <a class="{% if view == 'followup' %}on{% endif %}" href="{{ page_url(view='followup', page=1, status='', day='') }}">
     Follow-up <b>{{ stats.followup }}</b>
   </a>
-  <a class="{% if view == 'all' %}on{% endif %}" href="{{ page_url(view='all', page=1, status='') }}">
+  <a class="{% if view == 'all' %}on{% endif %}" href="{{ page_url(view='all', page=1, status='', day='') }}">
     All
   </a>
 </nav>
@@ -21,8 +21,20 @@
 <div class="toolbar">
   <form class="search" method="get">
     <input type="hidden" name="view" value="{{ view }}">
-    <input name="q" value="{{ q }}" placeholder="Search name or number">
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    <div class="day-nav" aria-label="Request date">
+      <a class="day-btn" href="{{ page_url(page=1, day=prev_day) }}" title="Previous day">‹</a>
+      <input type="date" name="day" value="{{ day or today }}" aria-label="Requested date" onchange="this.form.submit()">
+      <a class="day-btn" href="{{ page_url(page=1, day=next_day) }}" title="Next day">›</a>
+      {% if day and day != today %}
+      <a class="day-today" href="{{ page_url(page=1, day=today) }}">Today</a>
+      {% endif %}
+    </div>
+    <input name="q" value="{{ q }}" placeholder="Name or mobile number" inputmode="tel" autocomplete="off">
     <button type="submit">Find</button>
+    {% if q %}
+    <a class="clear-q" href="{{ page_url(page=1, q='') }}">Clear</a>
+    {% endif %}
   </form>
   <div class="toolbar-actions">
     <span id="sync-status" class="muted sync-live">Auto-sync on · App from {{ sync_from }}</span>
@@ -36,6 +48,7 @@
     </form>
   </div>
 </div>
+<p class="count-note">Showing <strong>{{ day_label }}</strong> · use ‹ › or the date box to open previous requests · search works with last 10 digits</p>
 {% if sync_error %}
 <p class="warn">App sync issue: {{ sync_error }}</p>
 {% endif %}
@@ -58,7 +71,7 @@
   </form>
 </details>
 
-<p class="count">{{ total }} appointments · page {{ page }} of {{ pages }}</p>
+<p class="count">{{ total }} appointments{% if q %} matching “{{ q }}”{% endif %} · page {{ page }} of {{ pages }}</p>
 
 <div class="table-wrap">
   <table class="desk">

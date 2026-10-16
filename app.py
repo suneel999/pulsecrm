@@ -57,6 +57,7 @@ def inject():
         "SERVICES": db.SERVICES,
         "format_when": db.format_when,
         "format_slot": db.format_slot,
+        "format_day_label": db.format_day_label,
         "short_doctor": db.short_doctor,
         "source_label": source_label,
         "today": db.today(),
@@ -150,10 +151,15 @@ def _desk_query():
         page = max(1, int(request.args.get("page") or 1))
     except ValueError:
         page = 1
+    day = (request.args.get("day") or "").strip()
+    if not db.valid_day(day):
+        # Fresh / coming default to today so staff can flip to previous days
+        day = db.today() if view in ("fresh", "coming") else ""
     return {
         "view": view,
         "status": request.args.get("status") or "",
-        "q": request.args.get("q") or "",
+        "q": (request.args.get("q") or "").strip(),
+        "day": day,
         "page": page,
     }
 
@@ -179,23 +185,32 @@ def desk():
         status=query["status"],
         q=query["q"],
         page=query["page"],
+        day=query["day"],
     )
     pages = max(1, (total + db.PAGE_SIZE - 1) // db.PAGE_SIZE)
     if query["page"] > pages:
         query["page"] = pages
         rows, total = db.list_page(
-            view=query["view"], status=query["status"], q=query["q"], page=pages
+            view=query["view"],
+            status=query["status"],
+            q=query["q"],
+            page=pages,
+            day=query["day"],
         )
     return render_template(
         "desk.html",
         rows=rows,
-        stats=db.stats(),
+        stats=db.stats(query["day"]),
         total=total,
         pages=pages,
         page=query["page"],
         view=query["view"],
         status=query["status"],
         q=query["q"],
+        day=query["day"],
+        day_label=db.format_day_label(query["day"] or db.today()),
+        prev_day=db.shift_day(query["day"] or db.today(), -1),
+        next_day=db.shift_day(query["day"] or db.today(), 1),
         month=db.today()[:7],
         next_url=_desk_url(),
         page_url=_desk_url,

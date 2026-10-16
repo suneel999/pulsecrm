@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -270,33 +270,92 @@ def format_slot(date_value: str, time_value: str) -> str:
     return f"{day} {time_value or ''}".strip()
 
 
-def _filters(view: str = "", status: str = "", q: str = "", month: str = "") -> tuple[list[str], list, str]:
+def valid_day(value: str) -> str:
+    day = clean(value, 10)
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        return day
+    return ""
+
+
+def phone_digits(value: str) -> str:
+    return re.sub(r"\D+", "", value or "")
+
+
+def shift_day(day: str, delta: int) -> str:
+    base = valid_day(day) or today()
+    try:
+        stamp = datetime.strptime(base, "%Y-%m-%d")
+    except ValueError:
+        stamp = datetime.strptime(today(), "%Y-%m-%d")
+    return (stamp + timedelta(days=delta)).strftime("%Y-%m-%d")
+
+
+def format_day_label(day: str) -> str:
+    value = valid_day(day) or today()
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%d %b %Y")
+    except ValueError:
+        return value
+
+
+def _filters(
+    view: str = "",
+    status: str = "",
+    q: str = "",
+    month: str = "",
+    day: str = "",
+) -> tuple[list[str], list, str]:
     where = ["1=1"]
     params: list = []
     order = "id DESC"
-    day = today()
+    today_s = today()
+    request_day = valid_day(day)
     if view == "fresh":
+        # Requested on this calendar day (defaults to today; pick earlier days for history)
         where.append("created_at LIKE ?")
-        params.append(f"{day}%")
+        params.append(f"{request_day or today_s}%")
         order = "id DESC"
     elif view == "coming":
+        slot_day = request_day or today_s
         where.append("preferred_date = ?")
         where.append("status NOT IN ('visited','cancelled')")
-        params.append(day)
+        params.append(slot_day)
         order = "preferred_time, name, id"
     elif view == "followup":
         where.append("status IN ('called','not_picked','second_call')")
+        if request_day:
+            where.append("created_at LIKE ?")
+            params.append(f"{request_day}%")
         order = "updated_at, id"
     elif view == "todo":
         where.append("status = 'new'")
+        if request_day:
+            where.append("created_at LIKE ?")
+            params.append(f"{request_day}%")
+        order = "id DESC"
+    elif view == "all" and request_day:
+        where.append("created_at LIKE ?")
+        params.append(f"{request_day}%")
         order = "id DESC"
     if status in STATUS_KEYS:
         where.append("status = ?")
         params.append(status)
     if q:
-        like = f"%{q}%"
-        where.append("(name LIKE ? OR phone LIKE ? OR doctor LIKE ? OR email LIKE ?)")
-        params.extend([like, like, like, like])
+        needle = clean(q, 80)
+        like = f"%{needle}%"
+        digits = phone_digits(needle)
+        if digits and len(digits) >= 3:
+            # Match raw phone and digit-only (ignores +91, spaces, dashes)
+            where.append(
+                """(
+                    name LIKE ? OR phone LIKE ? OR doctor LIKE ? OR email LIKE ?
+                    OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'+',''),'(',''),')',''),'/','') LIKE ?
+                )"""
+            )
+            params.extend([like, like, like, like, f"%{digits}%"])
+        else:
+            where.append("(name LIKE ? OR phone LIKE ? OR doctor LIKE ? OR email LIKE ?)")
+            params.extend([like, like, like, like])
     if month and re.match(r"^\d{4}-\d{2}$", month):
         where.append("(preferred_date LIKE ? OR created_at LIKE ?)")
         params.extend([f"{month}%", f"{month}%"])
@@ -304,24 +363,27 @@ def _filters(view: str = "", status: str = "", q: str = "", month: str = "") -> 
 
 
 def list_appts(status: str = "", q: str = "", day: str = "", month: str = "") -> list[dict]:
-    where, params, order = _filters(status=status, q=q, month=month)
-    if day:
-        where.append("(preferred_date = ? OR created_at LIKE ?)")
-        params.extend([day, f"{day}%"])
+    where, params, order = _filters(view="all", status=status, q=q, month=month, day=day)
     conn = connect()
     rows = conn.execute(
-        f"SELECT * FROM appointments WHERE {' AND '.join(where)} ORDER BY {order} LIMIT 400",
+        f"SELECT * FROM appointments WHERE {' AND '.join(where)} ORDER BY {order} LIMIT 2000",
         params,
     ).fetchall()
     conn.close()
     return [_row(row) for row in rows]
 
 
-def list_page(view: str = "fresh", status: str = "", q: str = "", page: int = 1) -> tuple[list[dict], int]:
+def list_page(
+    view: str = "fresh",
+    status: str = "",
+    q: str = "",
+    page: int = 1,
+    day: str = "",
+) -> tuple[list[dict], int]:
     if view not in VIEWS:
         view = "fresh"
     page = max(1, int(page or 1))
-    where, params, order = _filters(view=view, status=status, q=q)
+    where, params, order = _filters(view=view, status=status, q=q, day=day)
     conn = connect()
     total = conn.execute(
         f"SELECT COUNT(*) FROM appointments WHERE {' AND '.join(where)}",
@@ -376,18 +438,22 @@ def update(appt_id: int, data: dict) -> dict:
     return _row(updated)
 
 
-def stats() -> dict:
+def stats(day: str = "") -> dict:
     conn = connect()
-    day = today()
-    month = day[:7]
+    today_s = today()
+    request_day = valid_day(day) or today_s
+    month = today_s[:7]
     result = {
         "new": conn.execute("SELECT COUNT(*) FROM appointments WHERE status = 'new'").fetchone()[0],
         "today": conn.execute(
-            "SELECT COUNT(*) FROM appointments WHERE created_at LIKE ?", (f"{day}%",)
+            "SELECT COUNT(*) FROM appointments WHERE created_at LIKE ?", (f"{today_s}%",)
+        ).fetchone()[0],
+        "day_count": conn.execute(
+            "SELECT COUNT(*) FROM appointments WHERE created_at LIKE ?", (f"{request_day}%",)
         ).fetchone()[0],
         "coming": conn.execute(
             "SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND status NOT IN ('visited','cancelled')",
-            (day,),
+            (request_day,),
         ).fetchone()[0],
         "visited_month": conn.execute(
             "SELECT COUNT(*) FROM appointments WHERE status = 'visited' AND updated_at LIKE ?",
@@ -396,6 +462,7 @@ def stats() -> dict:
         "followup": conn.execute(
             "SELECT COUNT(*) FROM appointments WHERE status IN ('called','not_picked','second_call')"
         ).fetchone()[0],
+        "day": request_day,
     }
     conn.close()
     return result
