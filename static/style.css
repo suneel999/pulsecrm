@@ -80,6 +80,7 @@ button.ghost {
   color: var(--navy);
   border: 1px solid var(--navy);
 }
+.sync-live { font-size: 13px; align-self: center; }
 .tag {
   display: inline-block;
   font-size: 11px;

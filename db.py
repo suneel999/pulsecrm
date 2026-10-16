@@ -222,6 +222,29 @@ def upsert_app(rows: list[dict]) -> dict:
     return {"added": added, "refreshed": refreshed, "total": added + refreshed}
 
 
+def purge_app_before(cutoff: str) -> int:
+    """Remove Hi Pulse App rows older than the desk start date (keeps To call small)."""
+    day = clean(cutoff, 10)
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        return 0
+    conn = connect()
+    cur = conn.execute(
+        """
+        DELETE FROM appointments
+        WHERE source = 'app'
+          AND (
+            (created_at != '' AND created_at < ?)
+            OR (created_at = '' AND preferred_date != '' AND preferred_date < ?)
+          )
+        """,
+        (day, day),
+    )
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return int(deleted or 0)
+
+
 def get(appt_id: int) -> dict | None:
     conn = connect()
     row = conn.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone()

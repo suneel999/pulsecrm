@@ -25,9 +25,10 @@
     <button type="submit">Find</button>
   </form>
   <div class="toolbar-actions">
+    <span id="sync-status" class="muted sync-live">Auto-sync on · App from {{ sync_from }}</span>
     <form method="post" action="{{ url_for('sync_app') }}">
       <input type="hidden" name="next" value="{{ next_url }}">
-      <button type="submit" class="ghost">Sync Hi Pulse App</button>
+      <button type="submit" class="ghost">Sync now</button>
     </form>
     <form class="month-form" method="get" action="{{ url_for('report') }}">
       <input type="month" name="month" value="{{ month }}" aria-label="Month">
@@ -38,6 +39,7 @@
 {% if sync_error %}
 <p class="warn">App sync issue: {{ sync_error }}</p>
 {% endif %}
+<p id="new-banner" class="flash" hidden>New requests arrived. <a href="{{ next_url }}">Refresh list</a></p>
 
 <details class="card add-box">
   <summary>Add phone / walk-in</summary>
@@ -130,4 +132,45 @@
   {% endif %}
 </nav>
 {% endif %}
+<script>
+(function () {
+  var todoCount = {{ stats.new }};
+  var todayCount = {{ stats.today }};
+  var statusEl = document.getElementById("sync-status");
+  var banner = document.getElementById("new-banner");
+  var syncUrl = {{ url_for('sync_app_api')|tojson }};
+
+  function tick() {
+    fetch(syncUrl, { credentials: "same-origin", headers: { "Accept": "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          if (statusEl) statusEl.textContent = "Auto-sync issue — use Sync now";
+          return;
+        }
+        var s = data.stats || {};
+        if (statusEl) {
+          statusEl.textContent = data.skipped
+            ? ("Auto-sync on · App from " + (data.from || "{{ sync_from }}"))
+            : ("Synced · +" + (data.added || 0) + " new · App from " + (data.from || "{{ sync_from }}"));
+        }
+        if ((s.new || 0) > todoCount || (s.today || 0) > todayCount) {
+          if (banner) banner.hidden = false;
+          // Soft reload so Fresh / To call stay current without staff clicking Sync
+          if ((data.added || 0) > 0) {
+            window.location.reload();
+          }
+        }
+        todoCount = s.new || todoCount;
+        todayCount = s.today || todayCount;
+      })
+      .catch(function () {
+        if (statusEl) statusEl.textContent = "Auto-sync offline — use Sync now";
+      });
+  }
+
+  setInterval(tick, 30000);
+  setTimeout(tick, 8000);
+})();
+</script>
 {% endblock %}

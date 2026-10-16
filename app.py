@@ -32,7 +32,8 @@ app.secret_key = os.getenv("FLASK_SECRET", "pulse-desk-dev-secret")
 app.config["PREFERRED_URL_SCHEME"] = "https"
 
 _last_app_sync = 0.0
-_SYNC_GAP_SEC = 90
+_SYNC_GAP_SEC = 30
+_purged_old_app = False
 
 
 def env(name: str, default: str = "") -> str:
@@ -78,16 +79,25 @@ def source_label(source: str) -> str:
 
 
 def sync_app_requests(force: bool = False) -> dict | None:
-    global _last_app_sync
+    global _last_app_sync, _purged_old_app
     if not env("APP_API_EMAIL") or not env("APP_API_PASSWORD"):
         return None
     now = time.time()
     if not force and _last_app_sync and (now - _last_app_sync) < _SYNC_GAP_SEC:
-        return {"skipped": True}
+        return {"skipped": True, "stats": db.stats()}
+    cutoff = app_api.sync_from_date()
+    if not _purged_old_app:
+        purged = db.purge_app_before(cutoff)
+        _purged_old_app = True
+    else:
+        purged = 0
     rows = app_api.fetch_appointments(limit=50, max_pages=20)
     result = db.upsert_app(rows)
     _last_app_sync = now
     result["fetched"] = len(rows)
+    result["purged"] = purged
+    result["from"] = cutoff
+    result["stats"] = db.stats()
     return result
 
 
@@ -190,6 +200,7 @@ def desk():
         next_url=_desk_url(),
         page_url=_desk_url,
         sync_error=sync_error,
+        sync_from=app_api.sync_from_date(),
     )
 
 
@@ -201,14 +212,37 @@ def sync_app():
         if result.get("skipped"):
             flash("App list is already up to date.")
         else:
+            extra = ""
+            if result.get("purged"):
+                extra = f" Cleared {result['purged']} old App rows before {result.get('from')}."
             flash(
                 f"App sync done: {result.get('added', 0)} new, "
                 f"{result.get('refreshed', 0)} refreshed "
-                f"({result.get('fetched', 0)} from Hi Pulse)."
+                f"(from {result.get('from')}).{extra}"
             )
     except Exception as exc:
         flash(f"App sync failed: {exc}")
     return redirect(request.form.get("next") or url_for("desk", view="fresh"))
+
+
+@app.get("/api/sync-app")
+@login_required
+def sync_app_api():
+    """Silent sync for the open desk tab — front office does not need to click Sync."""
+    try:
+        result = sync_app_requests(force=bool(request.args.get("force"))) or {}
+        return {
+            "ok": True,
+            "skipped": bool(result.get("skipped")),
+            "added": int(result.get("added") or 0),
+            "refreshed": int(result.get("refreshed") or 0),
+            "purged": int(result.get("purged") or 0),
+            "fetched": int(result.get("fetched") or 0),
+            "from": result.get("from") or app_api.sync_from_date(),
+            "stats": result.get("stats") or db.stats(),
+        }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}, 500
 
 
 @app.post("/<int:appt_id>/update")

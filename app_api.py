@@ -122,8 +122,14 @@ def normalize(row: dict) -> dict:
     }
 
 
+def sync_from_date() -> str:
+    """Only keep Hi Pulse App requests from this day onward (IST date YYYY-MM-DD)."""
+    return _env("APP_SYNC_FROM") or "2026-10-14"
+
+
 def fetch_appointments(limit: int = 50, max_pages: int = 20) -> list[dict]:
     token = login()
+    cutoff = sync_from_date()
     rows: list[dict] = []
     page = 1
     while page <= max_pages:
@@ -143,9 +149,21 @@ def fetch_appointments(limit: int = 50, max_pages: int = 20) -> list[dict]:
         batch = data.get("data") or []
         if not batch:
             break
-        rows.extend(normalize(item) for item in batch)
+        keep_going = False
+        for item in batch:
+            row = normalize(item)
+            created = row.get("created_at") or ""
+            # API is newest-first; stop after we pass the cutoff window.
+            if created and created[:10] >= cutoff:
+                if row.get("external_id") and row.get("phone"):
+                    rows.append(row)
+                keep_going = True
+            elif not created:
+                if row.get("external_id") and row.get("phone"):
+                    rows.append(row)
+                keep_going = True
         total_pages = int(data.get("totalPages") or page)
-        if page >= total_pages:
+        if not keep_going or page >= total_pages:
             break
         page += 1
-    return [row for row in rows if row.get("external_id") and row.get("phone")]
+    return rows
