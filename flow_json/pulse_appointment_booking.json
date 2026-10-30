@@ -41,30 +41,12 @@
             }
           },
           "__example__": [
-            { "id": "mukharjee", "title": "Dr. M.S.S. Mukharjee" },
-            { "id": "movva_srinivas", "title": "Dr. Movva Srinivas" }
-          ]
-        },
-        "location": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" }
-            }
-          },
-          "__example__": [
-            { "id": "miyapur", "title": "Pulse Heart · Miyapur" }
+            { "id": "none", "title": "Select department first" }
           ]
         },
         "is_doctor_enabled": {
           "type": "boolean",
-          "__example__": true
-        },
-        "is_location_enabled": {
-          "type": "boolean",
-          "__example__": true
+          "__example__": false
         },
         "date": {
           "type": "array",
@@ -76,13 +58,12 @@
             }
           },
           "__example__": [
-            { "id": "2026-11-02", "title": "Mon 02 Nov 2026" },
-            { "id": "2026-11-03", "title": "Tue 03 Nov 2026" }
+            { "id": "2026-11-02", "title": "Mon 02 Nov 2026" }
           ]
         },
         "is_date_enabled": {
           "type": "boolean",
-          "__example__": true
+          "__example__": false
         },
         "time": {
           "type": "array",
@@ -94,14 +75,12 @@
             }
           },
           "__example__": [
-            { "id": "09:00 AM", "title": "09:00 AM" },
-            { "id": "10:30 AM", "title": "10:30 AM" },
-            { "id": "03:00 PM", "title": "03:00 PM" }
+            { "id": "10:30 AM", "title": "10:30 AM" }
           ]
         },
         "is_time_enabled": {
           "type": "boolean",
-          "__example__": true
+          "__example__": false
         }
       },
       "layout": {
@@ -123,7 +102,6 @@
                     "trigger": "department_selected",
                     "department": "${form.department}",
                     "doctor": "",
-                    "location": "",
                     "date": "",
                     "time": ""
                   }
@@ -142,26 +120,6 @@
                     "trigger": "doctor_selected",
                     "department": "${form.department}",
                     "doctor": "${form.doctor}",
-                    "location": "",
-                    "date": "",
-                    "time": ""
-                  }
-                }
-              },
-              {
-                "type": "Dropdown",
-                "label": "Location",
-                "name": "location",
-                "data-source": "${data.location}",
-                "required": "${data.is_location_enabled}",
-                "enabled": "${data.is_location_enabled}",
-                "on-select-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "trigger": "location_selected",
-                    "department": "${form.department}",
-                    "doctor": "${form.doctor}",
-                    "location": "${form.location}",
                     "date": "",
                     "time": ""
                   }
@@ -180,7 +138,6 @@
                     "trigger": "date_selected",
                     "department": "${form.department}",
                     "doctor": "${form.doctor}",
-                    "location": "${form.location}",
                     "date": "${form.date}",
                     "time": ""
                   }
@@ -206,9 +163,9 @@
                   "payload": {
                     "department": "${form.department}",
                     "doctor": "${form.doctor}",
-                    "location": "${form.location}",
                     "date": "${form.date}",
-                    "time": "${form.time}"
+                    "time": "${form.time}",
+                    "error_message": ""
                   }
                 }
               }
@@ -229,10 +186,6 @@
           "type": "string",
           "__example__": "movva_srinivas"
         },
-        "location": {
-          "type": "string",
-          "__example__": "miyapur"
-        },
         "date": {
           "type": "string",
           "__example__": "2026-11-02"
@@ -240,6 +193,10 @@
         "time": {
           "type": "string",
           "__example__": "10:30 AM"
+        },
+        "error_message": {
+          "type": "string",
+          "__example__": ""
         }
       },
       "layout": {
@@ -250,16 +207,13 @@
             "name": "details_form",
             "children": [
               {
-                "type": "TextInput",
-                "label": "Name",
-                "name": "name",
-                "required": true
+                "type": "TextBody",
+                "text": "${data.error_message}"
               },
               {
                 "type": "TextInput",
-                "label": "Email",
-                "name": "email",
-                "input-type": "email",
+                "label": "Name",
+                "name": "name",
                 "required": true
               },
               {
@@ -284,11 +238,9 @@
                   "payload": {
                     "department": "${data.department}",
                     "doctor": "${data.doctor}",
-                    "location": "${data.location}",
                     "date": "${data.date}",
                     "time": "${data.time}",
                     "name": "${form.name}",
-                    "email": "${form.email}",
                     "phone": "${form.phone}",
                     "more_details": "${form.more_details}"
                   }
@@ -306,11 +258,11 @@
       "data": {
         "appointment": {
           "type": "string",
-          "__example__": "Cardiology · Dr. Movva Srinivas\nat Pulse Heart · Miyapur\nMon 02 Nov 2026 at 10:30 AM"
+          "__example__": "Cardiology · Dr. Movva Srinivas\nPulse Heart · Miyapur\nMon 02 Nov 2026 at 10:30 AM"
         },
         "details": {
           "type": "string",
-          "__example__": "Name: Patient\nEmail: patient@example.com\nPhone: 9876543210"
+          "__example__": "Name: Patient\nPhone: 9876543210"
         },
         "department": {
           "type": "string",
@@ -319,10 +271,6 @@
         "doctor": {
           "type": "string",
           "__example__": "movva_srinivas"
-        },
-        "location": {
-          "type": "string",
-          "__example__": "miyapur"
         },
         "date": {
           "type": "string",
@@ -335,10 +283,6 @@
         "name": {
           "type": "string",
           "__example__": "Patient"
-        },
-        "email": {
-          "type": "string",
-          "__example__": "patient@example.com"
         },
         "phone": {
           "type": "string",
@@ -394,11 +338,9 @@
                   "payload": {
                     "department": "${data.department}",
                     "doctor": "${data.doctor}",
-                    "location": "${data.location}",
                     "date": "${data.date}",
                     "time": "${data.time}",
                     "name": "${data.name}",
-                    "email": "${data.email}",
                     "phone": "${data.phone}",
                     "more_details": "${data.more_details}"
                   }
@@ -421,7 +363,7 @@
           },
           {
             "type": "TextBody",
-            "text": "Appointments at Pulse Heart Super Speciality Hospital, Miyapur are subject to doctor availability and hospital schedule. Submitting this form requests a slot; our desk will confirm by call or WhatsApp. For emergencies or same-day urgent care, call +91 8886688063. Sunday OP is closed. Dr. Mukharjee bookings are limited to the day after tomorrow. Other doctors: today slots open only from 2 hours ahead."
+            "text": "Appointments at Pulse Heart Super Speciality Hospital, Miyapur are subject to doctor availability. Our desk will confirm by call or WhatsApp. For emergencies call +91 8886688063. Sunday OP is closed. Dr. Mukharjee: day after tomorrow only. Other doctors: today slots from 2 hours ahead."
           }
         ]
       }

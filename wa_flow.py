@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo
 import db
 
 IST = ZoneInfo("Asia/Kolkata")
+DEFAULT_LOCATION = "miyapur"
+DEFAULT_LOCATION_TITLE = "Pulse Heart · Miyapur"
 
 # Dropdown titles must be ≤30 chars (WhatsApp Flows limit).
 DEPARTMENTS = [
@@ -19,12 +21,7 @@ DEPARTMENTS = [
     {"id": "radiology", "title": "Radiology"},
 ]
 
-LOCATIONS = [
-    {"id": "miyapur", "title": "Pulse Heart · Miyapur"},
-]
-
 DEPT_TITLE = {item["id"]: item["title"] for item in DEPARTMENTS}
-LOC_TITLE = {item["id"]: item["title"] for item in LOCATIONS}
 
 DEPT_CRM = {
     "cardiology": "Cardiology",
@@ -36,7 +33,7 @@ DEPT_CRM = {
     "radiology": "Radiology & Imaging",
 }
 
-# id → short title (≤30) + CRM full name. Slot rules in SLOT_RULES.
+# Per-department doctors only (never shared across depts).
 DOCTORS_BY_DEPT: dict[str, list[dict]] = {
     "cardiology": [
         {
@@ -119,7 +116,6 @@ DOCTORS_BY_DEPT: dict[str, list[dict]] = {
     ],
 }
 
-# Default OP half-hour slots (matches doctor marketing pages).
 DEFAULT_SLOTS = [
     "10:30 AM",
     "11:00 AM",
@@ -179,20 +175,22 @@ def _doctors_for(department_id: str) -> list[dict]:
     ]
 
 
-def _doctor_crm(doctor_id: str) -> str:
+def _doctor_meta(doctor_id: str) -> dict | None:
     for docs in DOCTORS_BY_DEPT.values():
         for d in docs:
             if d["id"] == doctor_id:
-                return d["crm"]
-    return doctor_id or ""
+                return d
+    return None
+
+
+def _doctor_crm(doctor_id: str) -> str:
+    meta = _doctor_meta(doctor_id)
+    return meta["crm"] if meta else (doctor_id or "")
 
 
 def _doctor_title(doctor_id: str) -> str:
-    for docs in DOCTORS_BY_DEPT.values():
-        for d in docs:
-            if d["id"] == doctor_id:
-                return d["title"]
-    return doctor_id or "—"
+    meta = _doctor_meta(doctor_id)
+    return meta["title"] if meta else (doctor_id or "—")
 
 
 def _base_slots(department_id: str, doctor_id: str) -> list[str]:
@@ -207,7 +205,6 @@ def _base_slots(department_id: str, doctor_id: str) -> list[str]:
 
 
 def _day_after_tomorrow_working() -> date:
-    """Mukharjee: only day-after-tomorrow; if Sunday, use Monday."""
     day = datetime.now(IST).date() + timedelta(days=2)
     if day.weekday() == 6:
         day += timedelta(days=1)
@@ -245,8 +242,6 @@ def _times_for(department_id: str, doctor_id: str, date_id: str) -> list[dict]:
     if chosen != today:
         return _slot_options(slots)
 
-    # Other doctors: only slots at least 2 hours from now (today).
-    # Mukharjee never books today (date list is day-after-tomorrow only).
     cutoff = datetime.now(IST) + timedelta(hours=2)
     filtered = []
     for label in slots:
@@ -259,36 +254,40 @@ def _times_for(department_id: str, doctor_id: str, date_id: str) -> list[dict]:
 def _appointment_screen(
     department: str = "",
     doctor: str = "",
-    location: str = "",
     date_id: str = "",
     time: str = "",
 ) -> dict:
-    doctors = _doctors_for(department) if department else []
-    dates = (
-        _upcoming_dates_for_doctor(doctor)
-        if doctor
-        else _upcoming_dates_for_doctor("")
-    )
-    times = (
-        _times_for(department, doctor, date_id)
-        if department and doctor and date_id
-        else _times_for(department or "cardiology", doctor or "", "")
-    )
+    doctors = _doctors_for(department)
+    if not department:
+        doctors = [{"id": "none", "title": "Select department first"}]
+    elif not doctors:
+        doctors = [{"id": "none", "title": "No doctors in department"}]
+
+    dates = _upcoming_dates_for_doctor(doctor) if doctor and doctor != "none" else []
+    if not dates:
+        dates = [{"id": "none", "title": "Select doctor first"}]
+
+    if department and doctor and doctor != "none" and date_id and date_id != "none":
+        times = _times_for(department, doctor, date_id)
+    else:
+        times = [{"id": "none", "title": "Select date first"}]
+    if not times:
+        times = [{"id": "none", "title": "No slots available"}]
+
     return {
         "screen": "APPOINTMENT",
         "data": {
             "department": DEPARTMENTS,
-            "doctor": doctors or [{"id": "_", "title": "Select department first"}],
-            "location": LOCATIONS,
+            "doctor": doctors,
             "date": dates,
-            "time": times or [{"id": "_", "title": "No slots available"}],
+            "time": times,
             "is_doctor_enabled": bool(department),
-            "is_location_enabled": bool(department) and bool(doctor),
-            "is_date_enabled": bool(department) and bool(doctor) and bool(location),
+            "is_date_enabled": bool(department) and bool(doctor) and doctor != "none",
             "is_time_enabled": bool(department)
             and bool(doctor)
-            and bool(location)
-            and bool(date_id),
+            and doctor != "none"
+            and bool(date_id)
+            and date_id != "none",
         },
     }
 
@@ -316,7 +315,6 @@ def get_next_screen(decrypted_body: dict) -> dict:
     if action == "INIT":
         payload = _appointment_screen()
         payload["data"]["is_doctor_enabled"] = False
-        payload["data"]["is_location_enabled"] = False
         payload["data"]["is_date_enabled"] = False
         payload["data"]["is_time_enabled"] = False
         payload["version"] = version
@@ -326,42 +324,52 @@ def get_next_screen(decrypted_body: dict) -> dict:
         raise ValueError(f"Unhandled action: {action}")
 
     if screen == "APPOINTMENT":
-        department = str(data.get("department") or "")
-        doctor = str(data.get("doctor") or "")
-        location = str(data.get("location") or "")
-        date_id = str(data.get("date") or "")
-        time = str(data.get("time") or "")
-        # Reset dependent fields when parent changes mid-cascade
+        department = str(data.get("department") or "").strip()
+        doctor = str(data.get("doctor") or "").strip()
+        date_id = str(data.get("date") or "").strip()
+        time = str(data.get("time") or "").strip()
+
+        if doctor in ("", "none"):
+            doctor = ""
+        if date_id in ("", "none"):
+            date_id = ""
+        if time in ("", "none"):
+            time = ""
+
+        # Always rebuild doctor list from department; drop stale doctor from other depts
+        allowed = {d["id"] for d in _doctors_for(department)}
         if not department:
-            doctor = location = date_id = time = ""
-        elif doctor and doctor not in {d["id"] for d in _doctors_for(department)}:
-            doctor = location = date_id = time = ""
-        response = _appointment_screen(department, doctor, location, date_id, time)
+            doctor = date_id = time = ""
+        elif doctor and doctor not in allowed:
+            doctor = date_id = time = ""
+
+        response = _appointment_screen(department, doctor, date_id, time)
         response["version"] = version
         return response
 
     if screen == "DETAILS":
         department = str(data.get("department") or "")
         doctor = str(data.get("doctor") or "")
-        location = str(data.get("location") or "")
         date_id = str(data.get("date") or "")
         time = str(data.get("time") or "")
         name = str(data.get("name") or "").strip()
-        email = str(data.get("email") or "").strip()
         phone = str(data.get("phone") or "").strip()
         more = str(data.get("more_details") or "").strip()
 
         dept_title = DEPT_TITLE.get(department, department)
-        loc_title = LOC_TITLE.get(location, location)
         doc_title = _doctor_title(doctor)
-        date_title = _find_title(_upcoming_dates_for_doctor(doctor, 21), date_id) if date_id else date_id
+        date_title = (
+            _find_title(_upcoming_dates_for_doctor(doctor, 21), date_id)
+            if date_id
+            else date_id
+        )
 
         appointment = (
             f"{dept_title} · {doc_title}\n"
-            f"at {loc_title}\n"
+            f"{DEFAULT_LOCATION_TITLE}\n"
             f"{date_title} at {time}"
         )
-        details = f"Name: {name}\nEmail: {email}\nPhone: {phone}"
+        details = f"Name: {name}\nPhone: {phone}"
         if more:
             details += f'\n"{more}"'
 
@@ -373,11 +381,9 @@ def get_next_screen(decrypted_body: dict) -> dict:
                 "details": details,
                 "department": department,
                 "doctor": doctor,
-                "location": location,
                 "date": date_id,
                 "time": time,
                 "name": name,
-                "email": email,
                 "phone": phone,
                 "more_details": more,
             },
@@ -386,7 +392,6 @@ def get_next_screen(decrypted_body: dict) -> dict:
     if screen == "SUMMARY":
         name = str(data.get("name") or "").strip()
         phone = str(data.get("phone") or "").strip()
-        email = str(data.get("email") or "").strip()
         department = str(data.get("department") or "")
         doctor = str(data.get("doctor") or "")
         date_id = str(data.get("date") or "")
@@ -399,20 +404,13 @@ def get_next_screen(decrypted_body: dict) -> dict:
                 "screen": "DETAILS",
                 "data": {
                     "error_message": "Name and phone are required.",
-                    **{
-                        k: data.get(k, "")
-                        for k in (
-                            "department",
-                            "doctor",
-                            "location",
-                            "date",
-                            "time",
-                            "name",
-                            "email",
-                            "phone",
-                            "more_details",
-                        )
-                    },
+                    "department": department,
+                    "doctor": doctor,
+                    "date": date_id,
+                    "time": time,
+                    "name": name,
+                    "phone": phone,
+                    "more_details": more,
                 },
             }
 
@@ -421,7 +419,7 @@ def get_next_screen(decrypted_body: dict) -> dict:
                 {
                     "name": name,
                     "phone": phone,
-                    "email": email,
+                    "email": "",
                     "department": DEPT_CRM.get(
                         department, DEPT_TITLE.get(department, department)
                     ),
@@ -442,11 +440,9 @@ def get_next_screen(decrypted_body: dict) -> dict:
                     "error_message": str(exc),
                     "department": department,
                     "doctor": doctor,
-                    "location": data.get("location") or "",
                     "date": date_id,
                     "time": time,
                     "name": name,
-                    "email": email,
                     "phone": phone,
                     "more_details": more,
                 },
