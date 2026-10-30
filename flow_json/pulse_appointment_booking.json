@@ -41,12 +41,8 @@
             }
           },
           "__example__": [
-            { "id": "none", "title": "Select department first" }
+            { "id": "movva_srinivas", "title": "Dr. Movva Srinivas" }
           ]
-        },
-        "is_doctor_enabled": {
-          "type": "boolean",
-          "__example__": false
         },
         "date": {
           "type": "array",
@@ -61,10 +57,6 @@
             { "id": "2026-11-02", "title": "Mon 02 Nov 2026" }
           ]
         },
-        "is_date_enabled": {
-          "type": "boolean",
-          "__example__": false
-        },
         "time": {
           "type": "array",
           "items": {
@@ -78,9 +70,17 @@
             { "id": "10:30 AM", "title": "10:30 AM" }
           ]
         },
+        "is_doctor_enabled": {
+          "type": "boolean",
+          "__example__": true
+        },
+        "is_date_enabled": {
+          "type": "boolean",
+          "__example__": true
+        },
         "is_time_enabled": {
           "type": "boolean",
-          "__example__": false
+          "__example__": true
         }
       },
       "layout": {
@@ -101,9 +101,9 @@
                   "payload": {
                     "trigger": "department_selected",
                     "department": "${form.department}",
-                    "doctor": "",
-                    "date": "",
-                    "time": ""
+                    "doctor": "${form.doctor}",
+                    "date": "${form.date}",
+                    "time": "${form.time}"
                   }
                 }
               },
@@ -112,7 +112,7 @@
                 "label": "Doctor",
                 "name": "doctor",
                 "data-source": "${data.doctor}",
-                "required": "${data.is_doctor_enabled}",
+                "required": true,
                 "enabled": "${data.is_doctor_enabled}",
                 "on-select-action": {
                   "name": "data_exchange",
@@ -120,8 +120,8 @@
                     "trigger": "doctor_selected",
                     "department": "${form.department}",
                     "doctor": "${form.doctor}",
-                    "date": "",
-                    "time": ""
+                    "date": "${form.date}",
+                    "time": "${form.time}"
                   }
                 }
               },
@@ -130,7 +130,7 @@
                 "label": "Date",
                 "name": "date",
                 "data-source": "${data.date}",
-                "required": "${data.is_date_enabled}",
+                "required": true,
                 "enabled": "${data.is_date_enabled}",
                 "on-select-action": {
                   "name": "data_exchange",
@@ -139,7 +139,7 @@
                     "department": "${form.department}",
                     "doctor": "${form.doctor}",
                     "date": "${form.date}",
-                    "time": ""
+                    "time": "${form.time}"
                   }
                 }
               },
@@ -148,7 +148,7 @@
                 "label": "Time",
                 "name": "time",
                 "data-source": "${data.time}",
-                "required": "${data.is_time_enabled}",
+                "required": true,
                 "enabled": "${data.is_time_enabled}"
               },
               {
@@ -290,7 +290,7 @@
         },
         "more_details": {
           "type": "string",
-          "__example__": "Chest pain follow-up"
+          "__example__": ""
         }
       },
       "layout": {

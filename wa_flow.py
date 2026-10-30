@@ -251,28 +251,61 @@ def _times_for(department_id: str, doctor_id: str, date_id: str) -> list[dict]:
     return _slot_options(filtered)
 
 
+def _ensure_option(options: list[dict], option_id: str, title: str = "") -> list[dict]:
+    """Keep a previously selected id in the list so Meta does not crash the Flow."""
+    if not option_id:
+        return options
+    if any(item["id"] == option_id for item in options):
+        return options
+    return [{"id": option_id, "title": title or option_id}] + options
+
+
 def _appointment_screen(
     department: str = "",
     doctor: str = "",
     date_id: str = "",
     time: str = "",
+    *,
+    form_doctor: str = "",
+    form_date: str = "",
+    form_time: str = "",
 ) -> dict:
-    doctors = _doctors_for(department)
-    if not department:
-        doctors = [{"id": "none", "title": "Select department first"}]
-    elif not doctors:
-        doctors = [{"id": "none", "title": "No doctors in department"}]
+    """Build APPOINTMENT data.
 
-    dates = _upcoming_dates_for_doctor(doctor) if doctor and doctor != "none" else []
-    if not dates:
-        dates = [{"id": "none", "title": "Select doctor first"}]
+    Important (Meta Flows): never remove a currently-selected dropdown id from
+    data-source — that throws "Selected id is not in options" and leaves
+    Doctor/Date/Time stuck disabled / optional.
+    """
+    # While disabled (no dept yet), still return a real non-empty doctor list
+    # like Meta's appointment template (they keep full location options).
+    allowed = _doctors_for(department) if department else _doctors_for("cardiology")
+    if not allowed:
+        allowed = [{"id": "unavailable", "title": "No doctors available"}]
 
-    if department and doctor and doctor != "none" and date_id and date_id != "none":
+    allowed_ids = {d["id"] for d in allowed}
+    doctor_ok = bool(doctor) and doctor in allowed_ids
+
+    doctors = list(allowed)
+    # Preserve whatever the WhatsApp client still has selected in the form
+    for candidate in (doctor, form_doctor):
+        if candidate and candidate not in {d["id"] for d in doctors}:
+            meta = _doctor_meta(candidate)
+            doctors = _ensure_option(
+                doctors, candidate, meta["title"] if meta else candidate
+            )
+
+    date_doctor = doctor if doctor_ok else ""
+    dates = _upcoming_dates_for_doctor(date_doctor)
+    date_ok = bool(date_id) and any(d["id"] == date_id for d in dates)
+    for candidate in (date_id, form_date):
+        dates = _ensure_option(dates, candidate)
+
+    if department and doctor_ok and date_ok:
         times = _times_for(department, doctor, date_id)
     else:
-        times = [{"id": "none", "title": "Select date first"}]
-    if not times:
-        times = [{"id": "none", "title": "No slots available"}]
+        times = _slot_options(DEFAULT_SLOTS)
+    for candidate in (time, form_time):
+        times = _ensure_option(times, candidate)
 
     return {
         "screen": "APPOINTMENT",
@@ -282,12 +315,8 @@ def _appointment_screen(
             "date": dates,
             "time": times,
             "is_doctor_enabled": bool(department),
-            "is_date_enabled": bool(department) and bool(doctor) and doctor != "none",
-            "is_time_enabled": bool(department)
-            and bool(doctor)
-            and doctor != "none"
-            and bool(date_id)
-            and date_id != "none",
+            "is_date_enabled": bool(department) and doctor_ok,
+            "is_time_enabled": bool(department) and doctor_ok and date_ok,
         },
     }
 
@@ -328,22 +357,28 @@ def get_next_screen(decrypted_body: dict) -> dict:
         doctor = str(data.get("doctor") or "").strip()
         date_id = str(data.get("date") or "").strip()
         time = str(data.get("time") or "").strip()
+        trigger = str(data.get("trigger") or "").strip()
 
-        if doctor in ("", "none"):
-            doctor = ""
-        if date_id in ("", "none"):
-            date_id = ""
-        if time in ("", "none"):
+        # Keep form values so we can leave their ids in data-source (Meta requirement)
+        form_doctor, form_date, form_time = doctor, date_id, time
+
+        # Parent field changed → children not "chosen" yet for enable flags
+        if trigger == "department_selected":
+            doctor = date_id = time = ""
+        elif trigger == "doctor_selected":
+            date_id = time = ""
+        elif trigger == "date_selected":
             time = ""
 
-        # Always rebuild doctor list from department; drop stale doctor from other depts
-        allowed = {d["id"] for d in _doctors_for(department)}
-        if not department:
-            doctor = date_id = time = ""
-        elif doctor and doctor not in allowed:
-            doctor = date_id = time = ""
-
-        response = _appointment_screen(department, doctor, date_id, time)
+        response = _appointment_screen(
+            department,
+            doctor,
+            date_id,
+            time,
+            form_doctor=form_doctor,
+            form_date=form_date,
+            form_time=form_time,
+        )
         response["version"] = version
         return response
 
