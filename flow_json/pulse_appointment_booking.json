@@ -1,0 +1,374 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "APPOINTMENT": ["DETAILS"],
+    "DETAILS": ["SUMMARY"],
+    "SUMMARY": ["SUCCESS", "TERMS"],
+    "TERMS": [],
+    "SUCCESS": []
+  },
+  "screens": [
+    {
+      "id": "APPOINTMENT",
+      "title": "Appointment",
+      "data": {
+        "department": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [{ "id": "cardiology", "title": "Cardiology" }]
+        },
+        "doctor": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [{ "id": "movva_srinivas", "title": "Dr. Movva Srinivas" }]
+        },
+        "location": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [{ "id": "miyapur", "title": "Pulse Heart · Miyapur" }]
+        },
+        "date": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [{ "id": "2026-11-01", "title": "Sat 01 Nov 2026" }]
+        },
+        "time": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [{ "id": "10:30 AM", "title": "10:30 AM" }]
+        },
+        "is_doctor_enabled": { "type": "boolean", "__example__": false },
+        "is_location_enabled": { "type": "boolean", "__example__": false },
+        "is_date_enabled": { "type": "boolean", "__example__": false },
+        "is_time_enabled": { "type": "boolean", "__example__": false }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "appointment_form",
+            "children": [
+              {
+                "type": "Dropdown",
+                "name": "department",
+                "label": "Department",
+                "required": true,
+                "data-source": "${data.department}",
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "department": "${form.department}",
+                    "doctor": "",
+                    "location": "",
+                    "date": "",
+                    "time": ""
+                  }
+                }
+              },
+              {
+                "type": "Dropdown",
+                "name": "doctor",
+                "label": "Doctor",
+                "required": true,
+                "enabled": "${data.is_doctor_enabled}",
+                "data-source": "${data.doctor}",
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "department": "${form.department}",
+                    "doctor": "${form.doctor}",
+                    "location": "",
+                    "date": "",
+                    "time": ""
+                  }
+                }
+              },
+              {
+                "type": "Dropdown",
+                "name": "location",
+                "label": "Location",
+                "required": true,
+                "enabled": "${data.is_location_enabled}",
+                "data-source": "${data.location}",
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "department": "${form.department}",
+                    "doctor": "${form.doctor}",
+                    "location": "${form.location}",
+                    "date": "",
+                    "time": ""
+                  }
+                }
+              },
+              {
+                "type": "Dropdown",
+                "name": "date",
+                "label": "Date",
+                "required": true,
+                "enabled": "${data.is_date_enabled}",
+                "data-source": "${data.date}",
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "department": "${form.department}",
+                    "doctor": "${form.doctor}",
+                    "location": "${form.location}",
+                    "date": "${form.date}",
+                    "time": ""
+                  }
+                }
+              },
+              {
+                "type": "Dropdown",
+                "name": "time",
+                "label": "Time",
+                "required": true,
+                "enabled": "${data.is_time_enabled}",
+                "data-source": "${data.time}",
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "department": "${form.department}",
+                    "doctor": "${form.doctor}",
+                    "location": "${form.location}",
+                    "date": "${form.date}",
+                    "time": "${form.time}"
+                  }
+                }
+              },
+              {
+                "type": "Footer",
+                "label": "Continue",
+                "on-click-action": {
+                  "name": "navigate",
+                  "next": { "type": "screen", "name": "DETAILS" },
+                  "payload": {
+                    "department": "${form.department}",
+                    "doctor": "${form.doctor}",
+                    "location": "${form.location}",
+                    "date": "${form.date}",
+                    "time": "${form.time}",
+                    "error_message": ""
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "DETAILS",
+      "title": "Your details",
+      "data": {
+        "department": { "type": "string", "__example__": "cardiology" },
+        "doctor": { "type": "string", "__example__": "movva_srinivas" },
+        "location": { "type": "string", "__example__": "miyapur" },
+        "date": { "type": "string", "__example__": "2026-11-01" },
+        "time": { "type": "string", "__example__": "10:30 AM" },
+        "error_message": { "type": "string", "__example__": "" }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "details_form",
+            "children": [
+              {
+                "type": "TextBody",
+                "text": "${data.error_message}",
+                "visible": "${data.error_message}"
+              },
+              {
+                "type": "TextInput",
+                "name": "name",
+                "label": "Full name",
+                "required": true,
+                "input-type": "text"
+              },
+              {
+                "type": "TextInput",
+                "name": "phone",
+                "label": "Phone",
+                "required": true,
+                "input-type": "phone"
+              },
+              {
+                "type": "TextInput",
+                "name": "email",
+                "label": "Email",
+                "required": false,
+                "input-type": "email"
+              },
+              {
+                "type": "TextArea",
+                "name": "more_details",
+                "label": "Notes (optional)",
+                "required": false
+              },
+              {
+                "type": "Footer",
+                "label": "Continue",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "department": "${data.department}",
+                    "doctor": "${data.doctor}",
+                    "location": "${data.location}",
+                    "date": "${data.date}",
+                    "time": "${data.time}",
+                    "name": "${form.name}",
+                    "phone": "${form.phone}",
+                    "email": "${form.email}",
+                    "more_details": "${form.more_details}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "SUMMARY",
+      "title": "Summary",
+      "data": {
+        "appointment": {
+          "type": "string",
+          "__example__": "Cardiology · Dr. Movva Srinivas\nat Pulse Heart · Miyapur\nSat 01 Nov 2026 at 10:30 AM"
+        },
+        "details": {
+          "type": "string",
+          "__example__": "Name: Patient\nPhone: 9876543210"
+        },
+        "department": { "type": "string", "__example__": "cardiology" },
+        "doctor": { "type": "string", "__example__": "movva_srinivas" },
+        "location": { "type": "string", "__example__": "miyapur" },
+        "date": { "type": "string", "__example__": "2026-11-01" },
+        "time": { "type": "string", "__example__": "10:30 AM" },
+        "name": { "type": "string", "__example__": "Patient" },
+        "email": { "type": "string", "__example__": "" },
+        "phone": { "type": "string", "__example__": "9876543210" },
+        "more_details": { "type": "string", "__example__": "" }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "summary_form",
+            "children": [
+              { "type": "TextHeading", "text": "Appointment" },
+              { "type": "TextBody", "text": "${data.appointment}" },
+              { "type": "TextHeading", "text": "Your details" },
+              { "type": "TextBody", "text": "${data.details}" },
+              {
+                "type": "Footer",
+                "label": "Confirm booking",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "department": "${data.department}",
+                    "doctor": "${data.doctor}",
+                    "location": "${data.location}",
+                    "date": "${data.date}",
+                    "time": "${data.time}",
+                    "name": "${data.name}",
+                    "email": "${data.email}",
+                    "phone": "${data.phone}",
+                    "more_details": "${data.more_details}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "TERMS",
+      "title": "Terms",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextBody",
+            "text": "Pulse Heart Super Speciality Hospital, Miyapur. Appointments are subject to doctor availability. For urgent care call +91 8886688063."
+          },
+          {
+            "type": "Footer",
+            "label": "Back",
+            "on-click-action": {
+              "name": "navigate",
+              "next": { "type": "screen", "name": "SUMMARY" },
+              "payload": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "SUCCESS",
+      "title": "Booked",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "extension_message_response": {
+          "type": "object",
+          "properties": {
+            "params": { "type": "object" }
+          },
+          "__example__": { "params": { "flow_token": "token" } }
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Appointment requested"
+          },
+          {
+            "type": "TextBody",
+            "text": "Thank you. Our desk will confirm your appointment shortly. For help call +91 8886688063."
+          }
+        ]
+      }
+    }
+  ]
+}

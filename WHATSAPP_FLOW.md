@@ -77,18 +77,20 @@ Expect JSON like `{"success":true}`.
 3. Connect your **Meta App** (same app as WhatsApp Cloud API)
 4. Ensure public key is uploaded (step A)
 
-### Departments in the template
+### Flow JSON (doctors + slot rules)
 
-Endpoint already returns Pulse departments:
+Paste `flow_json/pulse_appointment_booking.json` into Flow Builder (replace the draft JSON), **Save**, then Preview.
 
-- Cardiology, Neurology, Pulmonology, Gastroenterology  
-- Orthopedics, General Medicine, Radiology  
+Rules enforced by the endpoint (`wa_flow.py`):
 
-Location: **Miyapur only**  
-Dates: next ~14 OP days (Sun skipped)  
-Times: 10:30–3:30 (General Medicine also 6:30–7:30)
+- **Doctor** dropdown after department (site doctors, titles ≤30 chars)
+- **Dr. Mukharjee** (Cardiology): date = **day after tomorrow** only (Monday if that is Sunday)
+- **Dr. Movva Srinivas**: slots **9:00 AM–3:00 PM**
+- **Other doctors**: OP slots from resumes; **today** only shows slots **≥ 2 hours from now**
+- **General Medicine**: 10:30–1:30 + 6:30–7:30
+- Location: Miyapur · Sundays closed for OP
 
-If the Flow Builder dropdown ids differ from the template, open Endpoint → **Snippets → Responses** and align screen names: `APPOINTMENT`, `DETAILS`, `SUMMARY`, `SUCCESS`.
+Screen ids: `APPOINTMENT` → `DETAILS` → `SUMMARY` → `SUCCESS` (+ `TERMS`).
 
 ---
 
