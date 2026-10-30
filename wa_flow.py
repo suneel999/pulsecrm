@@ -46,26 +46,6 @@ DOCTORS_BY_DEPT: dict[str, list[dict]] = {
             "title": "Dr. Movva Srinivas",
             "crm": "Dr. Movva Srinivas (MD DM Cardiology - NIMS, FICPS Paris, France)",
         },
-        {
-            "id": "vinod_unni",
-            "title": "Dr. Vinod K. Unni",
-            "crm": "Dr. Vinod K. Unni (MD, DM Cardiology)",
-        },
-        {
-            "id": "kranti_chintala",
-            "title": "Dr. Kranti K. Chintala",
-            "crm": "Dr. Kranti Kumar Chintala (MBBS, MBA, ISB - Health Care Management)",
-        },
-        {
-            "id": "kiran_kumar",
-            "title": "Dr. Kanjrla Kiran Kumar",
-            "crm": "Dr. Kanjrla Kiran Kumar (MD DM Cardiology)",
-        },
-        {
-            "id": "vikash_shukla",
-            "title": "Dr. Vikash Shukla",
-            "crm": "Dr. Vikash Shukla (MBBS, PGDCC Cardiology, MRPC-UK)",
-        },
     ],
     "neurology": [
         {

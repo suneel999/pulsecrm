@@ -112,7 +112,7 @@
                 "label": "Doctor",
                 "name": "doctor",
                 "data-source": "${data.doctor}",
-                "required": true,
+                "required": "${data.is_doctor_enabled}",
                 "enabled": "${data.is_doctor_enabled}",
                 "on-select-action": {
                   "name": "data_exchange",
@@ -130,7 +130,7 @@
                 "label": "Date",
                 "name": "date",
                 "data-source": "${data.date}",
-                "required": true,
+                "required": "${data.is_date_enabled}",
                 "enabled": "${data.is_date_enabled}",
                 "on-select-action": {
                   "name": "data_exchange",
@@ -148,7 +148,7 @@
                 "label": "Time",
                 "name": "time",
                 "data-source": "${data.time}",
-                "required": true,
+                "required": "${data.is_time_enabled}",
                 "enabled": "${data.is_time_enabled}"
               },
               {
