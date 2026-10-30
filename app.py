@@ -37,6 +37,17 @@ import wa_flow_crypto
 # Dedupe webhook deliveries (Meta can retry)
 _seen_wa_msg_ids: set[str] = set()
 _SEEN_WA_MAX = 2000
+_last_wa_hook: dict = {
+    "at": None,
+    "sig_ok": None,
+    "object": None,
+    "fields": [],
+    "msg_count": 0,
+    "last_from": None,
+    "last_type": None,
+    "last_send_ok": None,
+    "last_error": None,
+}
 
 log = logging.getLogger("pulse-desk")
 
@@ -233,7 +244,7 @@ def whatsapp_flow():
 
 @app.get("/api/whatsapp/status")
 def whatsapp_status():
-    """Safe config check (no secrets). Open in browser after deploy."""
+    """Safe config check (no secrets). Open after sending a WhatsApp to see last_webhook."""
     token = env("WA_ACCESS_TOKEN")
     return {
         "ok": True,
@@ -245,8 +256,29 @@ def whatsapp_status():
         "app_secret_set": bool(env("WA_APP_SECRET") or env("META_APP_SECRET")),
         "skip_signature": env("WA_SKIP_SIGNATURE") in ("1", "true", "yes"),
         "flow_id_set": bool(env("WA_FLOW_ID")),
-        "hint": "If access_token_set is false, menu replies cannot send. Paste a fresh token into .env",
+        "last_webhook": _last_wa_hook,
+        "hint": (
+            "Send Hi to the business WA number, then reload this URL. "
+            "If last_webhook.at is null, Meta is not delivering messages (subscribe 'messages'). "
+            "Test send: GET /api/whatsapp/test-menu?phone=91XXXXXXXXXX&key=CRM_INGEST_KEY"
+        ),
     }
+
+
+@app.get("/api/whatsapp/test-menu")
+def whatsapp_test_menu():
+    """Force-send the Book/Emergency/Location menu (proves token works)."""
+    key = request.args.get("key") or ""
+    phone = request.args.get("phone") or ""
+    expected = env("CRM_INGEST_KEY")
+    if not expected or key != expected:
+        return {"ok": False, "error": "bad key"}, 401
+    if not phone:
+        return {"ok": False, "error": "phone required e.g. 9198XXXXXXXX"}, 400
+    result = wa_cloud.send_main_menu(phone)
+    _last_wa_hook["last_send_ok"] = bool(result)
+    _last_wa_hook["last_error"] = None if result else "test-menu send failed — check token"
+    return {"ok": bool(result), "to": wa_cloud.normalize_wa_to(phone), "graph": result}
 
 
 @app.get("/api/whatsapp/webhook")
@@ -270,45 +302,73 @@ def whatsapp_webhook_verify():
 def whatsapp_webhook():
     """Inbound WhatsApp messages → menu (Book / Emergency / Location)."""
     raw = request.get_data()
-    if not _wa_signature_ok(raw):
-        log.warning("WA webhook POST rejected: bad signature (check WA_APP_SECRET)")
-        # Still 200 so Meta does not disable the webhook; fix secret and retry
-        return Response("EVENT_RECEIVED", status=200)
-
+    sig_ok = _wa_signature_ok(raw)
     payload = request.get_json(silent=True) or {}
+
+    _last_wa_hook["at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _last_wa_hook["sig_ok"] = sig_ok
+    _last_wa_hook["object"] = payload.get("object")
+    _last_wa_hook["fields"] = [
+        str((c or {}).get("field") or "")
+        for e in (payload.get("entry") or [])
+        for c in (e.get("changes") or [])
+    ]
+    _last_wa_hook["msg_count"] = 0
+    _last_wa_hook["last_error"] = None
+
+    if not sig_ok:
+        # Still process — a wrong secret was previously dropping all replies silently
+        log.warning(
+            "WA webhook signature mismatch (processing anyway). Fix WA_APP_SECRET."
+        )
+        _last_wa_hook["last_error"] = "signature_mismatch"
+
     msg_count = 0
     try:
         for entry in payload.get("entry") or []:
             for change in entry.get("changes") or []:
                 value = change.get("value") or {}
                 field = change.get("field") or ""
-                # Some payloads omit field; still process if messages present
                 if field and field not in ("messages", "smb_message_echoes"):
                     continue
                 contacts = value.get("contacts") or []
                 messages = value.get("messages") or []
-                if not messages:
-                    continue
+                # Status-only webhooks have no messages
                 for msg in messages:
                     mid = str(msg.get("id") or "")
                     if mid:
                         if mid in _seen_wa_msg_ids:
-                            log.info("WA webhook skip duplicate %s", mid)
                             continue
                         _seen_wa_msg_ids.add(mid)
                         if len(_seen_wa_msg_ids) > _SEEN_WA_MAX:
                             _seen_wa_msg_ids.clear()
                     msg_count += 1
+                    _last_wa_hook["last_from"] = msg.get("from")
+                    _last_wa_hook["last_type"] = msg.get("type")
                     log.info(
                         "WA inbound type=%s from=%s",
                         msg.get("type"),
                         msg.get("from"),
                     )
-                    wa_cloud.handle_inbound_message(msg, contacts)
-    except Exception:
+                    try:
+                        wa_cloud.handle_inbound_message(msg, contacts)
+                        _last_wa_hook["last_send_ok"] = True
+                    except Exception as exc:
+                        _last_wa_hook["last_send_ok"] = False
+                        _last_wa_hook["last_error"] = str(exc)
+                        log.exception("WA handle_inbound failed")
+    except Exception as exc:
+        _last_wa_hook["last_error"] = str(exc)
         log.exception("WA webhook handler error")
+
+    _last_wa_hook["msg_count"] = msg_count
     if msg_count:
         log.info("WA webhook processed %s message(s)", msg_count)
+    elif payload.get("entry"):
+        log.info(
+            "WA webhook POST with no messages (statuses only?) fields=%s",
+            _last_wa_hook["fields"],
+        )
     return Response("EVENT_RECEIVED", status=200)
 
 
