@@ -144,17 +144,28 @@ def _wa_private_key() -> str:
 
 
 def _wa_signature_ok(raw_body: bytes) -> bool:
-    app_secret = env("WA_APP_SECRET") or env("META_APP_SECRET")
+    # Allow temporary bypass while wiring Meta (remove after health check passes)
+    if env("WA_SKIP_SIGNATURE") in ("1", "true", "yes"):
+        log.warning("WA_SKIP_SIGNATURE enabled — signature not verified")
+        return True
+    app_secret = (env("WA_APP_SECRET") or env("META_APP_SECRET")).strip().strip('"').strip("'")
     if not app_secret:
-        # Allow first-time wiring without signature; set WA_APP_SECRET before production.
         log.warning("WA_APP_SECRET not set — skipping signature check")
         return True
-    header = request.headers.get("X-Hub-Signature-256", "")
+    header = request.headers.get("X-Hub-Signature-256") or request.headers.get("x-hub-signature-256") or ""
     if not header.startswith("sha256="):
+        log.warning("WA Flow missing X-Hub-Signature-256 header (got %r)", header[:40])
         return False
     expected = hmac.new(app_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
     received = header.removeprefix("sha256=")
-    return hmac.compare_digest(expected, received)
+    ok = hmac.compare_digest(expected, received)
+    if not ok:
+        log.warning(
+            "WA Flow signature mismatch (body_len=%s secret_len=%s)",
+            len(raw_body),
+            len(app_secret),
+        )
+    return ok
 
 
 @app.get("/api/whatsapp/flow")
