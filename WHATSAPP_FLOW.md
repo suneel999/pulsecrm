@@ -13,20 +13,24 @@ Same EC2 as CRM. Bookings land on the desk with source **WA** next to Web and Ap
 cd /opt/pulse-desk
 sudo git pull
 sudo mkdir -p secrets
-sudo docker compose run --rm desk python scripts/gen_wa_flow_keys.py
-# If docker path fails, run on host with cryptography installed:
-#   sudo python3 scripts/gen_wa_flow_keys.py
+
+# Generate keys on the HOST (do not use docker for this if secrets was :ro)
+sudo openssl genrsa -out secrets/wa_flow_private.pem 2048
+sudo openssl rsa -in secrets/wa_flow_private.pem -pubout -out secrets/wa_flow_public.pem
+sudo chmod 600 secrets/wa_flow_private.pem
+sudo ls -la secrets/
+# must show wa_flow_private.pem and wa_flow_public.pem
 
 sudo nano .env
 ```
 
-Add (fill App Secret from Meta):
+Add (digits only for phone id — no comments on the same line):
 
 ```
 WA_FLOW_PRIVATE_KEY_PATH=secrets/wa_flow_private.pem
 WA_FLOW_PASSPHRASE=
 WA_APP_SECRET=YOUR_META_APP_SECRET
-WA_PHONE_NUMBER_ID=YOUR_PHONE_NUMBER_ID
+WA_PHONE_NUMBER_ID=1337805766078219
 WA_ACCESS_TOKEN=YOUR_SYSTEM_USER_OR_TEMP_TOKEN
 ```
 
@@ -40,20 +44,21 @@ curl -s https://desk.thepulseheart.com/api/whatsapp/flow
 
 ```bash
 cd /opt/pulse-desk
-PUB=$(sudo cat secrets/wa_flow_public.pem | awk '{printf "%s\\n", $0}')
-# Better: use the file with curl --data-urlencode
 
-sudo apt-get install -y jq 2>/dev/null || true
+# Clean exports (no comments in values)
+export WA_PHONE_NUMBER_ID="$(sudo grep '^WA_PHONE_NUMBER_ID=' .env | cut -d= -f2- | tr -d '[:space:]' | sed 's/#.*//')"
+export WA_ACCESS_TOKEN="$(sudo grep '^WA_ACCESS_TOKEN=' .env | cut -d= -f2- | tr -d '[:space:]' | sed 's/#.*//')"
 
-PHONE_NUMBER_ID="YOUR_PHONE_NUMBER_ID"
-TOKEN="YOUR_ACCESS_TOKEN"
+echo "PHONE=$WA_PHONE_NUMBER_ID"
+echo "TOKEN_LEN=${#WA_ACCESS_TOKEN}"
+# PHONE should be ~15-17 digits only
 
-curl -sS -X POST "https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/whatsapp_business_encryption" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -F "business_public_key=@secrets/wa_flow_public.pem"
+curl -sS -X POST "https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/whatsapp_business_encryption" \
+  -H "Authorization: Bearer ${WA_ACCESS_TOKEN}" \
+  -F "business_public_key=@/opt/pulse-desk/secrets/wa_flow_public.pem"
 ```
 
-If Meta rejects the file form, send JSON with newlines escaped — see Meta “Sign and upload the business public key” docs.
+Expect JSON like `{"success":true}`.
 
 ---
 
