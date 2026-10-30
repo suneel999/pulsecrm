@@ -1,10 +1,13 @@
 """Pulse Heart WhatsApp appointment Flow screen logic (Meta Appointment booking template)."""
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 import db
+
+log = logging.getLogger("pulse-desk.wa_flow")
 
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_LOCATION = "miyapur"
@@ -191,17 +194,19 @@ def _day_after_tomorrow_working() -> date:
     return day
 
 
-def _upcoming_dates_for_doctor(doctor_id: str, days: int = 14) -> list[dict]:
+def _upcoming_dates_for_doctor(doctor_id: str, days: int = 7) -> list[dict]:
+    """Next ~1 week of OP days (Sun skipped). Mukharjee starts day-after-tomorrow."""
     if doctor_id == "mukharjee":
-        day = _day_after_tomorrow_working()
-        return [{"id": day.isoformat(), "title": day.strftime("%a %d %b %Y")}]
+        start = _day_after_tomorrow_working()
+    else:
+        start = datetime.now(IST).date()
 
-    today = datetime.now(IST).date()
     out = []
     for offset in range(0, days + 10):
-        day = today + timedelta(days=offset)
+        day = start + timedelta(days=offset)
         if day.weekday() == 6:
             continue
+        # For non-Mukharjee, include from today; already using start=today
         out.append({"id": day.isoformat(), "title": day.strftime("%a %d %b %Y")})
         if len(out) >= days:
             break
@@ -429,15 +434,19 @@ def get_next_screen(decrypted_body: dict) -> dict:
                 },
             }
 
+        dept_crm = DEPT_CRM.get(
+            department, DEPT_TITLE.get(department, department)
+        )
+        doc_title = _doctor_title(doctor)
+        date_title = _find_title(_upcoming_dates_for_doctor(doctor, 14), date_id)
+
         try:
             db.create(
                 {
                     "name": name,
                     "phone": phone,
                     "email": "",
-                    "department": DEPT_CRM.get(
-                        department, DEPT_TITLE.get(department, department)
-                    ),
+                    "department": dept_crm,
                     "doctor": _doctor_crm(doctor),
                     "preferred_date": date_id,
                     "preferred_time": time,
@@ -463,6 +472,33 @@ def get_next_screen(decrypted_body: dict) -> dict:
                 },
             }
 
+        # Confirmation WhatsApp to the chat (flow_token = wa_id) and form phone
+        try:
+            import wa_cloud
+
+            confirm_to = (flow_token or "").strip() or phone
+            wa_cloud.send_booking_confirmation(
+                confirm_to,
+                name=name,
+                department=dept_crm,
+                doctor=doc_title,
+                date_label=date_title or date_id,
+                time_label=time,
+            )
+            if phone and wa_cloud.normalize_wa_to(phone) != wa_cloud.normalize_wa_to(
+                confirm_to
+            ):
+                wa_cloud.send_booking_confirmation(
+                    phone,
+                    name=name,
+                    department=dept_crm,
+                    doctor=doc_title,
+                    date_label=date_title or date_id,
+                    time_label=time,
+                )
+        except Exception:
+            log.exception("WA confirmation message failed")
+
         return {
             "version": version,
             "screen": "SUCCESS",
@@ -470,8 +506,8 @@ def get_next_screen(decrypted_body: dict) -> dict:
                 "extension_message_response": {
                     "params": {
                         "flow_token": flow_token,
-                        "department": DEPT_CRM.get(department, department),
-                        "doctor": _doctor_title(doctor),
+                        "department": dept_crm,
+                        "doctor": doc_title,
                         "date": date_id,
                         "time": time,
                     }

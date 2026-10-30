@@ -30,8 +30,13 @@ load_dotenv()
 
 import app_api
 import db
+import wa_cloud
 import wa_flow
 import wa_flow_crypto
+
+# Dedupe webhook deliveries (Meta can retry)
+_seen_wa_msg_ids: set[str] = set()
+_SEEN_WA_MAX = 2000
 
 log = logging.getLogger("pulse-desk")
 
@@ -187,6 +192,7 @@ def whatsapp_flow_info():
         "ok": True,
         "service": "pulse-whatsapp-flow",
         "endpoint": "POST /api/whatsapp/flow",
+        "webhook": "GET/POST /api/whatsapp/webhook",
         "hint": "Configure this URL in WhatsApp Manager → Flow → Endpoint",
     }
 
@@ -223,6 +229,49 @@ def whatsapp_flow():
         screen_response, decrypted["aes_key"], decrypted["initial_vector"]
     )
     return Response(encrypted, mimetype="text/plain")
+
+
+@app.get("/api/whatsapp/webhook")
+def whatsapp_webhook_verify():
+    """Meta webhook verification (WhatsApp → Configuration → Callback URL)."""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    expected = env("WA_VERIFY_TOKEN")
+    if mode == "subscribe" and expected and token == expected and challenge:
+        return Response(challenge, status=200, mimetype="text/plain")
+    log.warning("WA webhook verify failed mode=%s", mode)
+    return Response("Forbidden", status=403)
+
+
+@app.post("/api/whatsapp/webhook")
+def whatsapp_webhook():
+    """Inbound WhatsApp messages → menu (Book / Emergency / Location)."""
+    raw = request.get_data()
+    if not _wa_signature_ok(raw):
+        return Response(status=401)
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        for entry in payload.get("entry") or []:
+            for change in entry.get("changes") or []:
+                value = change.get("value") or {}
+                if change.get("field") and change.get("field") != "messages":
+                    continue
+                contacts = value.get("contacts") or []
+                for msg in value.get("messages") or []:
+                    mid = str(msg.get("id") or "")
+                    if mid:
+                        if mid in _seen_wa_msg_ids:
+                            continue
+                        _seen_wa_msg_ids.add(mid)
+                        if len(_seen_wa_msg_ids) > _SEEN_WA_MAX:
+                            _seen_wa_msg_ids.clear()
+                    wa_cloud.handle_inbound_message(msg, contacts)
+    except Exception:
+        log.exception("WA webhook handler error")
+    # Always 200 so Meta does not retry aggressively
+    return Response("EVENT_RECEIVED", status=200)
 
 
 @app.route("/login", methods=["GET", "POST"])

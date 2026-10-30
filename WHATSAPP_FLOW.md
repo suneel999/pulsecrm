@@ -84,38 +84,63 @@ Paste `flow_json/pulse_appointment_booking.json` into Flow Builder (replace the 
 Rules enforced by the endpoint (`wa_flow.py`):
 
 - **Doctor** dropdown after department (site doctors, titles ≤30 chars)
-- **Dr. Mukharjee** (Cardiology): date = **day after tomorrow** only (Monday if that is Sunday)
+- **Dates**: next **~1 week** of OP days (Sun skipped). Mukharjee starts **day after tomorrow**
 - **Dr. Movva Srinivas**: slots **9:00 AM–3:00 PM**
 - **Other doctors**: OP slots from resumes; **today** only shows slots **≥ 2 hours from now**
 - **General Medicine**: 10:30–1:30 + 6:30–7:30
-- Location: Miyapur · Sundays closed for OP
+- Location assumed Miyapur (no location field)
 
 Screen ids: `APPOINTMENT` → `DETAILS` → `SUMMARY` → `SUCCESS` (+ `TERMS`).
 
 ---
 
-## C. Test before Publish
+## C. Auto-reply menu (any patient message)
 
-1. Flow → **Preview / Test**
-2. Complete a booking with your phone
-3. Open https://desk.thepulseheart.com → **To call / Requested**  
-   Row should show tag **WA**, status **New**
-4. Only then click **Publish**
+Webhook URL (Meta App → WhatsApp → Configuration → Callback):  
+`https://desk.thepulseheart.com/api/whatsapp/webhook`
 
-### Optional: send Flow from Cloud API
+1. In `.env` on EC2 add (same App Secret already used for Flows):
 
-Use a message template or interactive Flow message with `flow_id` after publish. Front office can also share a CTA “Book appointment” that opens the Flow.
+```
+WA_VERIFY_TOKEN=pulse-wa-verify
+WA_FLOW_ID=
+WA_EMERGENCY_PHONE=9000777019
+WA_APPOINTMENTS_PHONE=8886688063
+```
+
+2. Meta → Webhook → Verify and save (token = `WA_VERIFY_TOKEN`)
+3. Subscribe to field **messages**
+4. Patient texts anything → bot replies with buttons:
+   - **Book appointment** → opens published Flow
+   - **Emergency** → emergency + appointments numbers + location pin
+   - **Location** → Miyapur map pin
+
+After **Publish**, copy Flow ID into `WA_FLOW_ID` and recreate containers.
+
+On Confirm, patient gets a WhatsApp **confirmation** message; desk gets a **WA** row.
 
 ---
 
-## D. After go-live checklist
+## D. Test then Publish
+
+1. Flow → **Preview** (interactive) → complete one booking  
+2. Desk shows **WA** row + confirmation message on WhatsApp  
+3. Click **Publish**  
+4. Set `WA_FLOW_ID` on EC2, rebuild  
+5. Message the business number → menu → Book → finish Flow  
+
+---
+
+## E. After go-live checklist
 
 | Check | OK |
 |-------|----|
 | Desk shows WA bookings | |
-| Website ingest key fixed (Hostinger `crm-endpoint.php`) | |
+| Confirmation WhatsApp after Confirm | |
+| Menu: Book / Emergency / Location | |
+| Website ingest key (Hostinger) | |
 | App sync still running | |
-| All three sources on one desk | Web / App / WA |
+| Web / App / WA on one desk | |
 
 ---
 
