@@ -229,6 +229,13 @@ def handle_inbound_message(msg: dict, contacts: list | None = None) -> None:
     """Process one inbound WhatsApp message object."""
     from_id = str(msg.get("from") or "")
     if not from_id:
+        log.warning("WA inbound missing from")
+        return
+
+    if not _phone_id() or not _token():
+        log.error(
+            "Cannot reply: set WA_PHONE_NUMBER_ID and WA_ACCESS_TOKEN in .env then recreate containers"
+        )
         return
 
     msg_type = msg.get("type")
@@ -242,6 +249,8 @@ def handle_inbound_message(msg: dict, contacts: list | None = None) -> None:
             button_id = str((interactive.get("list_reply") or {}).get("id") or "")
     elif msg_type == "button":
         button_id = str((msg.get("button") or {}).get("payload") or "")
+
+    log.info("WA handle from=%s type=%s button=%s", from_id, msg_type, button_id or "-")
 
     if button_id == "menu_book":
         send_flow(from_id, flow_token=from_id)
@@ -257,7 +266,8 @@ def handle_inbound_message(msg: dict, contacts: list | None = None) -> None:
         send_location(from_id)
         return
 
-    # Any other inbound message (text, image, etc.) → main menu
+    # Any other inbound (including button/list already handled) → main menu
+    # Also reply to empty-type edge cases Meta sometimes sends
     if msg_type in (
         "text",
         "image",
@@ -268,5 +278,15 @@ def handle_inbound_message(msg: dict, contacts: list | None = None) -> None:
         "contacts",
         "location",
         "unknown",
+        "interactive",
+        "button",
+        None,
+        "",
     ):
-        send_main_menu(from_id)
+        result = send_main_menu(from_id)
+        if not result:
+            log.error("WA main menu send failed for %s", from_id)
+        return
+
+    # Fallback: still send menu
+    send_main_menu(from_id)

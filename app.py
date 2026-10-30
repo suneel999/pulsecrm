@@ -231,6 +231,24 @@ def whatsapp_flow():
     return Response(encrypted, mimetype="text/plain")
 
 
+@app.get("/api/whatsapp/status")
+def whatsapp_status():
+    """Safe config check (no secrets). Open in browser after deploy."""
+    token = env("WA_ACCESS_TOKEN")
+    return {
+        "ok": True,
+        "webhook_verify_token_set": bool(env("WA_VERIFY_TOKEN")),
+        "phone_number_id_set": bool(env("WA_PHONE_NUMBER_ID")),
+        "phone_number_id_len": len(env("WA_PHONE_NUMBER_ID")),
+        "access_token_set": bool(token),
+        "access_token_len": len(token),
+        "app_secret_set": bool(env("WA_APP_SECRET") or env("META_APP_SECRET")),
+        "skip_signature": env("WA_SKIP_SIGNATURE") in ("1", "true", "yes"),
+        "flow_id_set": bool(env("WA_FLOW_ID")),
+        "hint": "If access_token_set is false, menu replies cannot send. Paste a fresh token into .env",
+    }
+
+
 @app.get("/api/whatsapp/webhook")
 def whatsapp_webhook_verify():
     """Meta webhook verification (WhatsApp → Configuration → Callback URL)."""
@@ -240,7 +258,11 @@ def whatsapp_webhook_verify():
     expected = env("WA_VERIFY_TOKEN")
     if mode == "subscribe" and expected and token == expected and challenge:
         return Response(challenge, status=200, mimetype="text/plain")
-    log.warning("WA webhook verify failed mode=%s", mode)
+    log.warning(
+        "WA webhook verify failed mode=%s token_match=%s",
+        mode,
+        bool(expected) and token == expected,
+    )
     return Response("Forbidden", status=403)
 
 
@@ -249,28 +271,44 @@ def whatsapp_webhook():
     """Inbound WhatsApp messages → menu (Book / Emergency / Location)."""
     raw = request.get_data()
     if not _wa_signature_ok(raw):
-        return Response(status=401)
+        log.warning("WA webhook POST rejected: bad signature (check WA_APP_SECRET)")
+        # Still 200 so Meta does not disable the webhook; fix secret and retry
+        return Response("EVENT_RECEIVED", status=200)
 
     payload = request.get_json(silent=True) or {}
+    msg_count = 0
     try:
         for entry in payload.get("entry") or []:
             for change in entry.get("changes") or []:
                 value = change.get("value") or {}
-                if change.get("field") and change.get("field") != "messages":
+                field = change.get("field") or ""
+                # Some payloads omit field; still process if messages present
+                if field and field not in ("messages", "smb_message_echoes"):
                     continue
                 contacts = value.get("contacts") or []
-                for msg in value.get("messages") or []:
+                messages = value.get("messages") or []
+                if not messages:
+                    continue
+                for msg in messages:
                     mid = str(msg.get("id") or "")
                     if mid:
                         if mid in _seen_wa_msg_ids:
+                            log.info("WA webhook skip duplicate %s", mid)
                             continue
                         _seen_wa_msg_ids.add(mid)
                         if len(_seen_wa_msg_ids) > _SEEN_WA_MAX:
                             _seen_wa_msg_ids.clear()
+                    msg_count += 1
+                    log.info(
+                        "WA inbound type=%s from=%s",
+                        msg.get("type"),
+                        msg.get("from"),
+                    )
                     wa_cloud.handle_inbound_message(msg, contacts)
     except Exception:
         log.exception("WA webhook handler error")
-    # Always 200 so Meta does not retry aggressively
+    if msg_count:
+        log.info("WA webhook processed %s message(s)", msg_count)
     return Response("EVENT_RECEIVED", status=200)
 
 
