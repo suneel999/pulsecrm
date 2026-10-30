@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import io
+import logging
 import os
 import time
 from functools import wraps
+from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import (
     Flask,
+    Response,
     abort,
     flash,
     redirect,
@@ -25,6 +30,10 @@ load_dotenv()
 
 import app_api
 import db
+import wa_flow
+import wa_flow_crypto
+
+log = logging.getLogger("pulse-desk")
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -119,6 +128,77 @@ def ingest():
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}, 400
     return {"ok": True, "id": row["id"]}
+
+
+def _wa_private_key() -> str:
+    pem = env("WA_FLOW_PRIVATE_KEY")
+    if pem:
+        return pem.replace("\\n", "\n")
+    path = env("WA_FLOW_PRIVATE_KEY_PATH", "secrets/wa_flow_private.pem")
+    key_path = Path(path)
+    if not key_path.is_absolute():
+        key_path = Path(__file__).resolve().parent / key_path
+    if key_path.is_file():
+        return key_path.read_text(encoding="utf-8")
+    return ""
+
+
+def _wa_signature_ok(raw_body: bytes) -> bool:
+    app_secret = env("WA_APP_SECRET") or env("META_APP_SECRET")
+    if not app_secret:
+        # Allow first-time wiring without signature; set WA_APP_SECRET before production.
+        log.warning("WA_APP_SECRET not set — skipping signature check")
+        return True
+    header = request.headers.get("X-Hub-Signature-256", "")
+    if not header.startswith("sha256="):
+        return False
+    expected = hmac.new(app_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    received = header.removeprefix("sha256=")
+    return hmac.compare_digest(expected, received)
+
+
+@app.get("/api/whatsapp/flow")
+def whatsapp_flow_info():
+    return {
+        "ok": True,
+        "service": "pulse-whatsapp-flow",
+        "endpoint": "POST /api/whatsapp/flow",
+        "hint": "Configure this URL in WhatsApp Manager → Flow → Endpoint",
+    }
+
+
+@app.post("/api/whatsapp/flow")
+def whatsapp_flow():
+    """Meta WhatsApp Flows data endpoint (encrypted). Saves bookings to desk as source=whatsapp."""
+    raw = request.get_data()
+    if not _wa_signature_ok(raw):
+        return Response(status=432)
+
+    private_pem = _wa_private_key()
+    if not private_pem:
+        log.error("WA Flow private key missing")
+        return Response(status=500)
+
+    body = request.get_json(silent=True) or {}
+    try:
+        decrypted = wa_flow_crypto.decrypt_request(
+            body, private_pem, env("WA_FLOW_PASSPHRASE")
+        )
+    except wa_flow_crypto.FlowCryptoError as exc:
+        log.warning("WA Flow crypto error: %s", exc)
+        return Response(status=exc.status_code)
+
+    decrypted_body = decrypted["decrypted_body"]
+    try:
+        screen_response = wa_flow.get_next_screen(decrypted_body)
+    except Exception:
+        log.exception("WA Flow logic error body=%s", decrypted_body)
+        return Response(status=500)
+
+    encrypted = wa_flow_crypto.encrypt_response(
+        screen_response, decrypted["aes_key"], decrypted["initial_vector"]
+    )
+    return Response(encrypted, mimetype="text/plain")
 
 
 @app.route("/login", methods=["GET", "POST"])

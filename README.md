@@ -32,3 +32,8 @@ Open http://127.0.0.1:8090/login
 ```
 
 Email still works if this desk is down.
+
+## WhatsApp Flows
+
+Same server. Endpoint: `https://desk.thepulseheart.com/api/whatsapp/flow`  
+Full Meta + EC2 steps: **[WHATSAPP_FLOW.md](WHATSAPP_FLOW.md)**
