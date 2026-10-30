@@ -143,25 +143,38 @@ def _wa_private_key() -> str:
     return ""
 
 
+def _wa_app_secret() -> str:
+    """App Secret of the Meta app connected to the Flow (Settings → Basic)."""
+    raw = env("WA_APP_SECRET") or env("META_APP_SECRET")
+    # Drop inline comments / quotes / CR from .env mistakes
+    raw = raw.split("#", 1)[0].strip().strip('"').strip("'").strip()
+    return raw
+
+
 def _wa_signature_ok(raw_body: bytes) -> bool:
     # Allow temporary bypass while wiring Meta (remove after health check passes)
     if env("WA_SKIP_SIGNATURE") in ("1", "true", "yes"):
         log.warning("WA_SKIP_SIGNATURE enabled — signature not verified")
         return True
-    app_secret = (env("WA_APP_SECRET") or env("META_APP_SECRET")).strip().strip('"').strip("'")
+    app_secret = _wa_app_secret()
     if not app_secret:
         log.warning("WA_APP_SECRET not set — skipping signature check")
         return True
-    header = request.headers.get("X-Hub-Signature-256") or request.headers.get("x-hub-signature-256") or ""
+    header = (
+        request.headers.get("X-Hub-Signature-256")
+        or request.headers.get("x-hub-signature-256")
+        or ""
+    ).strip()
     if not header.startswith("sha256="):
         log.warning("WA Flow missing X-Hub-Signature-256 header (got %r)", header[:40])
         return False
     expected = hmac.new(app_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    received = header.removeprefix("sha256=")
+    received = header.removeprefix("sha256=").strip()
     ok = hmac.compare_digest(expected, received)
     if not ok:
         log.warning(
-            "WA Flow signature mismatch (body_len=%s secret_len=%s)",
+            "WA Flow signature mismatch (body_len=%s secret_len=%s) — "
+            "must be App Secret of the Meta app selected under Connect Meta app",
             len(raw_body),
             len(app_secret),
         )
